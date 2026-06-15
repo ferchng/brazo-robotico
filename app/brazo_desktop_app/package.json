@@ -1,0 +1,17 @@
+{
+  "name": "brazo-desktop-app",
+  "version": "0.1.0",
+  "description": "App de escritorio para simulacion y control del brazo con ESP32 y STS3215",
+  "main": "main.js",
+  "author": "OpenAI Codex",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron ."
+  },
+  "dependencies": {
+    "serialport": "^12.0.0"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0"
+  }
+}

@@ -1,0 +1,430 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Control de Servos STS3215</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #111827;
+      --card: #1f2937;
+      --text: #e5e7eb;
+      --muted: #9ca3af;
+      --accent: #22c55e;
+      --accent-2: #38bdf8;
+      --danger: #ef4444;
+      --border: #374151;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Segoe UI, Arial, sans-serif;
+      background: radial-gradient(circle at top, #1e293b, var(--bg));
+      color: var(--text);
+    }
+    .wrap {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 28px;
+    }
+    .sub {
+      color: var(--muted);
+      margin-bottom: 20px;
+    }
+    .toolbar, .status, .card {
+      background: rgba(17, 24, 39, 0.88);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+    }
+    .toolbar, .status {
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    .toolbar {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    button {
+      border: 0;
+      border-radius: 12px;
+      padding: 10px 14px;
+      font-weight: 600;
+      cursor: pointer;
+      background: var(--accent-2);
+      color: #04111d;
+    }
+    button.secondary {
+      background: #334155;
+      color: var(--text);
+    }
+    button.danger {
+      background: var(--danger);
+      color: white;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(310px, 1fr));
+      gap: 16px;
+    }
+    .card {
+      padding: 16px;
+    }
+    .head {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 10px;
+    }
+    .head strong {
+      font-size: 20px;
+    }
+    .head span {
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      margin-top: 10px;
+    }
+    input[type="range"] {
+      width: 100%;
+      accent-color: var(--accent);
+    }
+    input[type="number"] {
+      width: 88px;
+      padding: 8px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: #0b1220;
+      color: var(--text);
+    }
+    .small {
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .console {
+      margin-top: 16px;
+      padding: 16px;
+      background: rgba(17, 24, 39, 0.88);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+    }
+    .console-input {
+      flex: 1;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: #0b1220;
+      color: var(--text);
+      font-family: Consolas, monospace;
+    }
+    .axis-labels {
+      display: flex;
+      justify-content: space-between;
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 6px;
+    }
+    .value {
+      color: var(--accent);
+      font-weight: 700;
+      min-width: 64px;
+      text-align: right;
+    }
+    textarea {
+      width: 100%;
+      min-height: 220px;
+      margin-top: 16px;
+      border-radius: 16px;
+      border: 1px solid var(--border);
+      background: #020617;
+      color: #d1fae5;
+      padding: 14px;
+      resize: vertical;
+      font-family: Consolas, monospace;
+    }
+    .status-line {
+      color: var(--muted);
+    }
+    .ok { color: var(--accent); }
+    .warn { color: #fbbf24; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Control de Servos STS3215</h1>
+    <div class="sub">Interfaz local por Web Serial. Mueve un servo por vez usando el protocolo del sketch del ESP32.</div>
+
+    <div class="toolbar">
+      <button id="connectBtn">Conectar ESP32</button>
+      <button id="disconnectBtn" class="secondary">Desconectar</button>
+      <button id="scanBtn" class="secondary">Scan</button>
+      <button id="posAllBtn" class="secondary">Posiciones</button>
+      <button id="stopSpamBtn" class="danger">Detener envios</button>
+      <span id="connState" class="status-line">Sin conectar</span>
+    </div>
+
+    <div class="status">
+      <div><strong>Seguridad</strong></div>
+      <div class="small">Esta UI envia comandos de a uno: <code>&lt;id&gt; &lt;grados&gt;</code>. Respeta tus limites por motor.</div>
+      <div class="small warn">Para el motor 6 la UI usa rango logico 0..140. El offset +10 grados lo sigue aplicando tu sketch del ESP32.</div>
+      <div class="small">Cooldown de movimientos: 1 segundo entre comandos de movimiento.</div>
+    </div>
+
+    <div id="cards" class="grid"></div>
+
+    <div class="console">
+      <div><strong>Consola de comandos</strong></div>
+      <div class="small">Sirve para debug: <code>posall</code>, <code>read 3</code>, <code>scan</code>, o comandos de movimiento.</div>
+      <div class="row">
+        <input id="commandInput" class="console-input" type="text" placeholder="Ej: posall o read 4 o 2 180">
+        <button id="sendCommandBtn">Enviar comando</button>
+      </div>
+    </div>
+
+    <textarea id="log" readonly></textarea>
+  </div>
+
+  <script>
+    const motorDefs = [
+      { id: 1, min: 60, max: 300, label: "Motor 1", role: "direccion" },
+      { id: 2, min: 90, max: 270, label: "Motor 2", role: "codo 1" },
+      { id: 3, min: 90, max: 270, label: "Motor 3", role: "codo 2" },
+      { id: 4, min: 75, max: 260, label: "Motor 4", role: "muñeca de pinza" },
+      { id: 5, min: 0, max: 340, label: "Motor 5", role: "rotador de pinza" },
+      { id: 6, min: 0, max: 140, label: "Motor 6", role: "pinza" }
+    ];
+
+    const cards = document.getElementById("cards");
+    const log = document.getElementById("log");
+    const connState = document.getElementById("connState");
+
+    let port = null;
+    let writer = null;
+    let reader = null;
+    let keepReading = false;
+    let sendTimers = {};
+    let lastMoveSentAt = 0;
+    const moveCooldownMs = 1000;
+
+    function addLog(text) {
+      log.value += text + "\n";
+      log.scrollTop = log.scrollHeight;
+    }
+
+    function setState(text, css = "") {
+      connState.className = `status-line ${css}`;
+      connState.textContent = text;
+    }
+
+    function renderCards() {
+      for (const motor of motorDefs) {
+        const initial = Math.round((motor.min + motor.max) / 2);
+        const card = document.createElement("div");
+        card.className = "card";
+        card.innerHTML = `
+          <div class="head">
+            <div>
+              <strong>${motor.label}</strong>
+              <div class="small">${motor.role}</div>
+            </div>
+            <span>ID ${motor.id} | ${motor.min}..${motor.max}°</span>
+          </div>
+          <div class="row">
+            <input id="range-${motor.id}" type="range" min="${motor.min}" max="${motor.max}" step="1" value="${initial}">
+            <div id="value-${motor.id}" class="value">${initial}°</div>
+          </div>
+          ${motor.id === 6 ? '<div class="axis-labels"><span>cerrar</span><span>abrir</span></div>' : ''}
+          <div class="row">
+            <input id="num-${motor.id}" type="number" min="${motor.min}" max="${motor.max}" step="1" value="${initial}">
+            <button data-id="${motor.id}" class="send-now">Mover ahora</button>
+            <button data-id="${motor.id}" class="read-now secondary">Leer</button>
+          </div>
+          <div class="small">Arrastrar la barra programa el envio con una espera corta para no saturar el puerto.</div>
+        `;
+        cards.appendChild(card);
+      }
+
+      for (const motor of motorDefs) {
+        const range = document.getElementById(`range-${motor.id}`);
+        const num = document.getElementById(`num-${motor.id}`);
+        const value = document.getElementById(`value-${motor.id}`);
+
+        const sync = (v) => {
+          const n = clamp(Number(v), motor.min, motor.max);
+          range.value = n;
+          num.value = n;
+          value.textContent = `${n}°`;
+          return n;
+        };
+
+        range.addEventListener("input", () => {
+          const n = sync(range.value);
+          scheduleMove(motor.id, n);
+        });
+
+        num.addEventListener("change", () => {
+          const n = sync(num.value);
+          scheduleMove(motor.id, n);
+        });
+      }
+
+      document.querySelectorAll(".send-now").forEach(btn => {
+        btn.addEventListener("click", async () => {
+          const id = Number(btn.dataset.id);
+          const angle = Number(document.getElementById(`num-${id}`).value);
+          await sendMove(id, angle);
+        });
+      });
+
+      document.querySelectorAll(".read-now").forEach(btn => {
+        btn.addEventListener("click", async () => {
+          const id = Number(btn.dataset.id);
+          await sendCommand(`read ${id}`);
+        });
+      });
+    }
+
+    function clamp(v, min, max) {
+      return Math.min(max, Math.max(min, Number.isFinite(v) ? v : min));
+    }
+
+    function scheduleMove(id, angle) {
+      clearTimeout(sendTimers[id]);
+      sendTimers[id] = setTimeout(() => {
+        sendMove(id, angle);
+      }, 180);
+    }
+
+    async function sendMove(id, angle) {
+      const now = Date.now();
+      const remaining = moveCooldownMs - (now - lastMoveSentAt);
+      if (remaining > 0) {
+        addLog(`[INFO] Cooldown UI activo. Esperando ${remaining} ms para mover.`);
+        await new Promise(resolve => setTimeout(resolve, remaining));
+      }
+      lastMoveSentAt = Date.now();
+      await sendCommand(`${id} ${angle}`);
+    }
+
+    async function sendCommand(cmd) {
+      if (!writer) {
+        addLog("[ERROR] No hay puerto conectado.");
+        return;
+      }
+      const line = cmd.trim() + "\n";
+      await writer.write(new TextEncoder().encode(line));
+      addLog(`> ${cmd}`);
+    }
+
+    async function connectSerial() {
+      if (!("serial" in navigator)) {
+        addLog("[ERROR] Este navegador no soporta Web Serial. Usa Edge o Chrome.");
+        return;
+      }
+
+      port = await navigator.serial.requestPort();
+      await port.open({ baudRate: 115200 });
+      writer = port.writable.getWriter();
+      keepReading = true;
+      setState("Conectado", "ok");
+      addLog("[INFO] Puerto abierto a 115200.");
+      readLoop();
+    }
+
+    async function disconnectSerial() {
+      keepReading = false;
+
+      try {
+        if (reader) {
+          await reader.cancel();
+          reader.releaseLock();
+          reader = null;
+        }
+      } catch {}
+
+      try {
+        if (writer) {
+          writer.releaseLock();
+          writer = null;
+        }
+      } catch {}
+
+      try {
+        if (port) {
+          await port.close();
+          port = null;
+        }
+      } catch {}
+
+      setState("Sin conectar");
+      addLog("[INFO] Puerto cerrado.");
+    }
+
+    async function readLoop() {
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (port && keepReading && port.readable) {
+        try {
+          reader = port.readable.getReader();
+          while (keepReading) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split(/\r?\n/);
+            buffer = lines.pop();
+            for (const line of lines) {
+              if (line.trim()) addLog(line);
+            }
+          }
+        } catch (err) {
+          addLog(`[ERROR] Lectura serie: ${err.message}`);
+          break;
+        } finally {
+          if (reader) {
+            reader.releaseLock();
+            reader = null;
+          }
+        }
+      }
+    }
+
+    document.getElementById("connectBtn").addEventListener("click", connectSerial);
+    document.getElementById("disconnectBtn").addEventListener("click", disconnectSerial);
+    document.getElementById("scanBtn").addEventListener("click", () => sendCommand("scan"));
+    document.getElementById("posAllBtn").addEventListener("click", () => sendCommand("posall"));
+    document.getElementById("stopSpamBtn").addEventListener("click", () => {
+      Object.keys(sendTimers).forEach(k => clearTimeout(sendTimers[k]));
+      addLog("[INFO] Temporizadores de envio detenidos.");
+    });
+    document.getElementById("sendCommandBtn").addEventListener("click", async () => {
+      const input = document.getElementById("commandInput");
+      const cmd = input.value.trim();
+      if (!cmd) return;
+      await sendCommand(cmd);
+      input.value = "";
+    });
+    document.getElementById("commandInput").addEventListener("keydown", async (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      const input = document.getElementById("commandInput");
+      const cmd = input.value.trim();
+      if (!cmd) return;
+      await sendCommand(cmd);
+      input.value = "";
+    });
+
+    renderCards();
+  </script>
+</body>
+</html>

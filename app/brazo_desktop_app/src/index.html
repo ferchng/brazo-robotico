@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Brazo Desktop App</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="eyebrow">Desktop Control</div>
+        <h1>Brazo App</h1>
+        <p>Simulación 3D local, puerto COM nativo y validación de reglas antes de mover el brazo.</p>
+      </div>
+
+      <section class="card">
+        <div class="section-title">Conexión</div>
+        <label class="field">
+          <span>Puerto</span>
+          <div class="row">
+            <select id="portSelect"></select>
+            <button id="refreshPortsBtn" class="secondary">Actualizar</button>
+          </div>
+        </label>
+        <label class="field">
+          <span>Baud rate</span>
+          <input id="baudInput" type="number" value="115200" step="1">
+        </label>
+        <div class="row">
+          <button id="connectBtn">Conectar</button>
+          <button id="disconnectBtn" class="secondary">Desconectar</button>
+        </div>
+        <div id="connState" class="hint">Sin conectar</div>
+      </section>
+
+      <section class="card">
+        <div class="section-title">Herramientas</div>
+        <div class="row wrap-row">
+          <button id="scanBtn" class="secondary">Scan</button>
+          <button id="posallBtn" class="secondary">Posall</button>
+          <button id="stopQueueBtn" class="secondary">Vaciar cola</button>
+        </div>
+        <div id="queueState" class="hint">Cola: 0</div>
+      </section>
+
+      <section class="card">
+        <div class="section-title">Objetivo XYZ</div>
+        <div class="field">
+          <span>X</span>
+          <input id="targetXInput" type="number" value="0" step="1">
+        </div>
+        <div class="field">
+          <span>Y</span>
+          <input id="targetYInput" type="number" value="180" step="1">
+        </div>
+        <div class="field">
+          <span>Z</span>
+          <input id="targetZInput" type="number" value="0" step="1">
+        </div>
+        <div class="row wrap-row">
+          <button id="solveTargetBtn">Calcular</button>
+          <button id="moveTargetBtn">Mover</button>
+          <button id="copyTcpBtn" class="secondary">Usar TCP actual</button>
+        </div>
+        <div id="targetState" class="hint">Todavía no se resolvió ningún objetivo.</div>
+      </section>
+
+      <section id="motorsPanel" class="motors"></section>
+    </aside>
+
+    <main class="main">
+      <section class="viewport-card">
+        <div class="viewport-head">
+          <div>
+            <div class="section-title">Vista 3D</div>
+            <div class="hint">Arrastrá para rotar la cámara. Rueda para zoom. Los sliders pueden mover el brazo en vivo.</div>
+          </div>
+          <div class="metrics">
+            <div class="metric">
+              <span>Pose</span>
+              <strong id="poseMetric">PERMITIDA</strong>
+            </div>
+            <div class="metric">
+              <span>Piso</span>
+              <strong id="floorMetric">-</strong>
+            </div>
+            <div class="metric">
+              <span>M4 máximo</span>
+              <strong id="m4Metric">260°</strong>
+            </div>
+            <div class="metric">
+              <span>TCP</span>
+              <strong id="tcpMetric">x 0 | y 0 | z 0</strong>
+            </div>
+          </div>
+        </div>
+        <canvas id="viewer" width="1200" height="780"></canvas>
+      </section>
+
+      <section class="bottom">
+        <section class="card status-card">
+          <div class="section-title">Estado</div>
+          <div id="statusBox" class="status-box">Inicializando app...</div>
+        </section>
+        <section class="card console-card">
+          <div class="section-title">Consola</div>
+          <div class="console-row">
+            <input id="commandInput" type="text" placeholder="Ej: posall, read 3, 2 180">
+            <button id="sendCommandBtn">Enviar</button>
+          </div>
+          <textarea id="logBox" readonly></textarea>
+        </section>
+      </section>
+    </main>
+  </div>
+  <script src="./kinematics.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>

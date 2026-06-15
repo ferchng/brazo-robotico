@@ -27,7 +27,7 @@ Total hardware cost: ~USD 350 vs USD 30,000–150,000 for equivalent industrial 
 | Resource | Link |
 |----------|------|
 | 🌐 Landing Page | [ferchng.github.io/brazo-robotico](https://ferchng.github.io/brazo-robotico) |
-| 📄 Technical Report | [View PDF](https://github.com/ferchng/brazo-robotico/blob/main/informe_brazo_robotico.pdf) |
+| 📄 Technical Report | [View PDF](https://github.com/ferchng/brazo-robotico/blob/main/docs/informe_brazo_robotico.pdf) |
 | 📸 Photo Gallery | [Google Photos](https://photos.app.goo.gl/9NATdUXzkGk8ssc47) |
 | 🎥 Demo Videos | *(coming soon)* |
 
@@ -82,23 +82,20 @@ Key differences from the original:
 
 ```
 brazo-robotico/
-├── brazo_desktop_app/               # Main Electron desktop app
-│   ├── src/
-│   │   ├── app.js                   # Core logic: 3D render, kinematics, serial queue
-│   │   ├── kinematics.js            # Direct kinematics, TCP calculation
-│   │   ├── index.html               # UI: connection, XYZ target, 3D view, console
-│   │   └── styles.css
-│   ├── main.js                      # Electron entry point
-│   └── preload.js                   # Secure API bridge (serial port)
-├── simulacion_3d_simplificada/      # Python geometric simulation scripts
+├── app/                             # Desktop app (Electron) + WebSerial UI
+│   ├── brazo_desktop_app/           # Main Electron app: 3D render, kinematics, serial control
+│   └── ui_servos_webserial/         # Browser-based WebSerial interface
 ├── firmware/                        # Arduino/ESP32 sketches
 │   ├── diagnostico_ping_sts3215_esp32/
 │   ├── setear_ids_sts3215_arduino/
 │   ├── leer_6_sts3215_bus_esp32/
 │   ├── mover_un_motor_por_angulo_esp32/
 │   └── mover_un_motor_por_angulo_esp32_test_reglas/  # ← main active sketch
-├── ui_simulador_3d_reglas/          # Web-based 3D simulator with rules
-├── docs/                            # Spanish documentation
+├── kinematics/                      # Python geometric simulation and kinematics
+│   └── simulacion_3d_simplificada/
+├── simulation/                      # Web-based 3D simulator prototypes (HTML + JS)
+├── vision/                          # Object detection pipeline (upcoming)
+├── docs/                            # Technical report
 │   └── informe_brazo_robotico.pdf
 ├── index.html                       # Landing page (GitHub Pages)
 └── README.md
@@ -161,12 +158,12 @@ git clone https://github.com/ferchng/brazo-robotico.git
 cd brazo-robotico
 
 # Desktop app
-cd brazo_desktop_app
+cd app/brazo_desktop_app
 npm install
 npm start
 
 # Python simulation
-cd ../simulacion_3d_simplificada
+cd ../../kinematics/simulacion_3d_simplificada
 python visualizador_brazo_con_reglas.py
 ```
 

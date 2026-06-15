@@ -16,7 +16,7 @@ This project implements a low-cost 6 degree-of-freedom robotic arm capable of:
 - **Autonomous object detection** using a fine-tuned YOLO model
 - **Direct kinematics** for precise PC-to-arm coordinate translation
 - **Autonomous sorting** based on object classification
-- **2D/3D simulation** for software-enforced joint angle limits
+- **2D/3D simulation** with software-enforced joint angle limits and dynamic geometric rules
 
 Total hardware cost: ~USD 350 vs USD 30,000–150,000 for equivalent industrial arms.
 
@@ -40,10 +40,10 @@ This project builds upon the open-source [SO-ARM101](https://github.com/TheRobot
 > 📦 **Bill of Materials, CAD files, and hardware assembly instructions** are available in the original [SO-ARM101 repository](https://github.com/TheRobotStudio/SO-ARM101). Our technical report (linked above) includes the specific components and pricing used in this build.
 
 Key differences from the original:
-- Custom direct kinematics algorithm (Python, PC-side)
-- Fine-tuned YOLO model for object classification
-- 2D/3D simulation for hardware-safe angle limits
-- Fixed camera architecture (under evaluation vs. wrist-mounted)
+- Custom direct kinematics in JavaScript (`kinematics.js`) inside an Electron desktop app
+- 2D/3D simulation with dynamic geometric safety rules per joint
+- Stereo vision pipeline planned (USB webcams / smartphones)
+- Fine-tuned YOLO model for object classification (upcoming)
 
 ---
 
@@ -52,11 +52,13 @@ Key differences from the original:
 | Component | Specs |
 |-----------|-------|
 | Servomotors | 6× Feetech STS3215 (12V, 30kg·cm) |
-| Driver | Waveshare Bus Servo Adapter (A) |
-| Microcontroller | ESP32 (via Arduino IDE) |
-| Camera | USB 1080p module (architecture TBD: fixed vs. wrist) |
+| Driver | Waveshare Bus Servo Adapter (A) V1.1 |
+| Microcontroller | ESP32 |
+| Vision (prototype) | 2× smartphones via USB (stereo) |
+| Vision (production) | 2× USB webcams (fixed, stereo) |
 | Frame | 3D printed (PLA MAX, Creality Ender 3 V3 SE) |
 | Base | Recycled 40×40cm pressed wood board |
+| Power | External 12V supply |
 
 ---
 
@@ -64,11 +66,14 @@ Key differences from the original:
 
 | Layer | Technology |
 |-------|-----------|
-| Object detection | YOLO (Ultralytics) with fine-tuning |
-| Vision pipeline | MediaPipe + custom post-processing |
-| Kinematics | Python (direct kinematics, custom implementation) |
-| Simulation | Python 2D/3D (software joint angle limits) |
-| Microcontroller | Arduino IDE (ESP32) |
+| Desktop app | Electron (Node.js) |
+| Direct kinematics | JavaScript (`kinematics.js`) |
+| 3D render | Canvas / Three.js |
+| Simulation (Python) | Python — geometric validation scripts |
+| Simulation (web) | HTML + JavaScript prototypes |
+| Object detection | YOLO (Ultralytics) with fine-tuning — upcoming |
+| Vision pipeline | Python + OpenCV (stereo, upcoming) |
+| Firmware | Arduino IDE (ESP32) |
 | Dev tools | VS Code, OpenAI Codex, GitHub |
 
 ---
@@ -77,17 +82,29 @@ Key differences from the original:
 
 ```
 brazo-robotico/
-├── kinematics/          # Direct kinematics algorithm (PC → arm)
-├── simulation/          # 2D/3D simulation for angle limit validation
-├── vision/              # YOLO pipeline and camera feed processing
-├── firmware/            # Arduino/ESP32 firmware
-├── docs/                # Spanish documentation
+├── brazo_desktop_app/               # Main Electron desktop app
+│   ├── src/
+│   │   ├── app.js                   # Core logic: 3D render, kinematics, serial queue
+│   │   ├── kinematics.js            # Direct kinematics, TCP calculation
+│   │   ├── index.html               # UI: connection, XYZ target, 3D view, console
+│   │   └── styles.css
+│   ├── main.js                      # Electron entry point
+│   └── preload.js                   # Secure API bridge (serial port)
+├── simulacion_3d_simplificada/      # Python geometric simulation scripts
+├── firmware/                        # Arduino/ESP32 sketches
+│   ├── diagnostico_ping_sts3215_esp32/
+│   ├── setear_ids_sts3215_arduino/
+│   ├── leer_6_sts3215_bus_esp32/
+│   ├── mover_un_motor_por_angulo_esp32/
+│   └── mover_un_motor_por_angulo_esp32_test_reglas/  # ← main active sketch
+├── ui_simulador_3d_reglas/          # Web-based 3D simulator with rules
+├── docs/                            # Spanish documentation
 │   └── informe_brazo_robotico.pdf
-├── index.html           # Landing page
+├── index.html                       # Landing page (GitHub Pages)
 └── README.md
 ```
 
-> ⚠️ **Pre-alpha:** code is actively being tested and debugged. Structure may change.
+> ⚠️ **Pre-alpha:** code is actively being tested and debugged. `node_modules/` is excluded from the repo.
 
 ---
 
@@ -96,11 +113,31 @@ brazo-robotico/
 | Module | Status |
 |--------|--------|
 | Mechanical assembly | ✅ 100% complete |
-| 2D/3D simulation | ✅ Functional prototype |
-| Direct kinematics (PC → arm) | 🔄 ~80% — polishing base coordinates |
-| Camera feed → kinematics commands | ⏳ Planned (Jul–Aug 2026) |
+| Servo ID assignment & telemetry | ✅ Complete |
+| Fixed + dynamic joint angle limits | ✅ Complete |
+| 2D/3D geometric simulation | ✅ Functional prototype |
+| Electron desktop app | ✅ Functional (active development) |
+| Direct kinematics (PC → arm) | 🔄 ~80% — polishing XYZ coordinates |
+| Stereo vision (smartphones → PC) | ⏳ Planned (Jul–Aug 2026) |
 | YOLO fine-tuning & integration | ⏳ Planned (Jul–Aug 2026) |
 | Full sorting demo | ⏳ Target: Nov 2026 |
+
+---
+
+## 🔩 Joint Angle Limits
+
+Fixed limits per motor:
+
+| Motor | Range |
+|-------|-------|
+| M1 | 60° – 300° |
+| M2 | 90° – 270° |
+| M3 | 90° – 270° |
+| M4 | 75° – 260° (+ dynamic rules) |
+| M5 | 0° – 340° |
+| M6 | 0° – 140° (gripper, with offset) |
+
+M4 also has dynamic geometric rules based on M2 and M3 pose to prevent collisions.
 
 ---
 
@@ -110,10 +147,12 @@ brazo-robotico/
 
 ### Prerequisites
 
-- Python 3.10+
-- Arduino IDE 2.x
+- Node.js + npm (for Electron app)
+- Python 3.10+ (for simulation scripts)
+- Arduino IDE 2.x (for ESP32 firmware)
 - Feetech STS3215 servos × 6
-- Waveshare Bus Servo Adapter (A)
+- Waveshare Bus Servo Adapter (A) V1.1
+- External 12V power supply
 
 ### Quick Start *(pre-alpha)*
 
@@ -121,11 +160,14 @@ brazo-robotico/
 git clone https://github.com/ferchng/brazo-robotico.git
 cd brazo-robotico
 
-# Install Python dependencies
-pip install -r requirements.txt  # coming soon
+# Desktop app
+cd brazo_desktop_app
+npm install
+npm start
 
-# Run simulation
-python simulation/sim_3d.py
+# Python simulation
+cd ../simulacion_3d_simplificada
+python visualizador_brazo_con_reglas.py
 ```
 
 ---

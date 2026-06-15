@@ -1,0 +1,527 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Prueba 3D Brazo</title>
+  <style>
+    :root {
+      --bg: #09101d;
+      --panel: #131d31;
+      --text: #e5e7eb;
+      --muted: #94a3b8;
+      --border: #334155;
+      --ok: #22c55e;
+      --warn: #f59e0b;
+      --bad: #ef4444;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: radial-gradient(circle at top, #16213a, var(--bg));
+      color: var(--text);
+      font-family: Segoe UI, Arial, sans-serif;
+    }
+    .wrap {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 20px;
+      display: grid;
+      grid-template-columns: 1.15fr 0.85fr;
+      gap: 16px;
+    }
+    .panel {
+      background: rgba(19, 29, 49, 0.94);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 14px;
+    }
+    h1 { margin: 0 0 8px; }
+    .sub { color: var(--muted); margin-bottom: 14px; }
+    #viewer {
+      width: 100%;
+      height: 760px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      overflow: hidden;
+      background: linear-gradient(180deg, #0d1628, #050914);
+    }
+    .status {
+      margin-top: 10px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      background: rgba(2, 6, 23, 0.85);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      white-space: pre-wrap;
+      min-height: 58px;
+    }
+    .motor-card {
+      padding: 12px;
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      background: rgba(9, 16, 29, 0.9);
+      margin-bottom: 12px;
+    }
+    .motor-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 8px;
+    }
+    .role { color: var(--muted); font-size: 13px; }
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    input[type="range"] {
+      width: 100%;
+      accent-color: var(--ok);
+    }
+    .val {
+      min-width: 56px;
+      text-align: right;
+      font-weight: 700;
+      color: var(--ok);
+    }
+    .hint {
+      color: var(--muted);
+      font-size: 13px;
+      margin-top: 8px;
+    }
+    .good { color: var(--ok); }
+    .warn { color: var(--warn); }
+    .bad { color: var(--bad); }
+    @media (max-width: 1100px) {
+      .wrap { grid-template-columns: 1fr; }
+      #viewer { height: 520px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="panel">
+      <h1>Prueba 3D aislada</h1>
+      <div class="sub">Esto es independiente del HTML grande. Solo dibuja el brazo en 3D con <code>Three.js</code> y las reglas de M2/M3/M4.</div>
+      <div id="viewer"></div>
+      <div id="status" class="status">Inicializando escena 3D...</div>
+    </div>
+
+    <div class="panel">
+      <div class="motor-card">
+        <div class="motor-head">
+          <strong>Motor 2</strong>
+          <span class="role">codo 1</span>
+        </div>
+        <div class="row">
+          <input id="m2" type="range" min="90" max="270" step="1" value="180">
+          <span id="m2v" class="val">180°</span>
+        </div>
+      </div>
+
+      <div class="motor-card">
+        <div class="motor-head">
+          <strong>Motor 3</strong>
+          <span class="role">codo 2</span>
+        </div>
+        <div class="row">
+          <input id="m3" type="range" min="90" max="270" step="1" value="90">
+          <span id="m3v" class="val">90°</span>
+        </div>
+      </div>
+
+      <div class="motor-card">
+        <div class="motor-head">
+          <strong>Motor 4</strong>
+          <span class="role">muñeca de pinza</span>
+        </div>
+        <div class="row">
+          <input id="m4" type="range" min="75" max="260" step="1" value="180">
+          <span id="m4v" class="val">180°</span>
+        </div>
+        <div id="m4max" class="hint">M4 max actual: 260°</div>
+      </div>
+
+      <div class="motor-card">
+        <strong>Qué probar</strong>
+        <div class="hint">
+          1. Si se ve la escena, el problema estaba en el HTML grande.<br>
+          2. Si no se ve nada, el problema es la carga de <code>Three.js</code> o el navegador.<br>
+          3. La cámara se mueve con mouse: arrastre rota, rueda hace zoom.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import * as THREE from "https://unpkg.com/three@0.165.0/build/three.module.js";
+    import { OrbitControls } from "https://unpkg.com/three@0.165.0/examples/jsm/controls/OrbitControls.js";
+
+    const geom = {
+      hBase: 100,
+      wBase: 35,
+      l1: 113,
+      w1: 25,
+      offsetM3: 27,
+      l2: 137,
+      w2: 25,
+      l3: 60,
+      w3: 25,
+      gripperLen: 100,
+      gripperWidth: 65,
+      depth: 25
+    };
+
+    const floorTouch = 5;
+    const floorRisk = 30;
+    const mirrorX = true;
+    const offsetSign = 1;
+
+    const statusEl = document.getElementById("status");
+    const sliders = {
+      2: document.getElementById("m2"),
+      3: document.getElementById("m3"),
+      4: document.getElementById("m4")
+    };
+    const labels = {
+      2: document.getElementById("m2v"),
+      3: document.getElementById("m3v"),
+      4: document.getElementById("m4v")
+    };
+    const m4maxEl = document.getElementById("m4max");
+
+    const state = { 2: 180, 3: 90, 4: 180 };
+    const lastValid = { ...state };
+
+    function degToRad(d) { return d * Math.PI / 180; }
+    function add(a, b) { return { x: a.x + b.x, y: a.y + b.y }; }
+    function sub(a, b) { return { x: a.x - b.x, y: a.y - b.y }; }
+    function scale(v, k) { return { x: v.x * k, y: v.y * k }; }
+    function vec(len, ang) { return { x: len * Math.cos(ang), y: len * Math.sin(ang) }; }
+    function dot(a, b) { return a.x * b.x + a.y * b.y; }
+
+    function pointSegmentDistance(p, a, b) {
+      const ab = sub(b, a);
+      const ap = sub(p, a);
+      const abLen2 = dot(ab, ab);
+      if (abLen2 <= 1e-9) return Math.hypot(p.x - a.x, p.y - a.y);
+      let t = dot(ap, ab) / abLen2;
+      t = Math.max(0, Math.min(1, t));
+      const proj = add(a, scale(ab, t));
+      return Math.hypot(p.x - proj.x, p.y - proj.y);
+    }
+
+    function orient(a, b, c) {
+      return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+    }
+
+    function onSegment(a, b, p) {
+      return Math.min(a.x, b.x) <= p.x && p.x <= Math.max(a.x, b.x) &&
+             Math.min(a.y, b.y) <= p.y && p.y <= Math.max(a.y, b.y);
+    }
+
+    function segmentsIntersect(a, b, c, d) {
+      const o1 = orient(a, b, c);
+      const o2 = orient(a, b, d);
+      const o3 = orient(c, d, a);
+      const o4 = orient(c, d, b);
+      if (Math.abs(o1) < 1e-6 && onSegment(a, b, c)) return true;
+      if (Math.abs(o2) < 1e-6 && onSegment(a, b, d)) return true;
+      if (Math.abs(o3) < 1e-6 && onSegment(c, d, a)) return true;
+      if (Math.abs(o4) < 1e-6 && onSegment(c, d, b)) return true;
+      return ((o1 > 0) !== (o2 > 0)) && ((o3 > 0) !== (o4 > 0));
+    }
+
+    function pointInRect(p, xMin, xMax, yMin, yMax) {
+      return xMin <= p.x && p.x <= xMax && yMin <= p.y && p.y <= yMax;
+    }
+
+    function getDynamicM4Max(m2, m3) {
+      let maxM4 = 260;
+      const reasons = [];
+      if (m2 <= 100 && m3 <= 110) { maxM4 = Math.min(maxM4, 130); reasons.push("M2<=100 y M3<=110"); }
+      if (m2 <= 120 && m3 <= 100) { maxM4 = Math.min(maxM4, 120); reasons.push("M2<=120 y M3<=100"); }
+      if (m2 >= 240 && m3 >= 140) { maxM4 = Math.min(maxM4, 200); reasons.push("M2>=240 y M3>=140"); }
+      if (m2 >= 260) { maxM4 = Math.min(maxM4, 185); reasons.push("M2>=260"); }
+      if (m3 >= 250) { maxM4 = Math.min(maxM4, 230); reasons.push("M3>=250"); }
+      if (m2 >= 185 && m3 >= 245) { maxM4 = Math.min(maxM4, 250); reasons.push("M2>=185 y M3>=245"); }
+      if (m2 >= 200 && m3 >= 255) { maxM4 = Math.min(maxM4, 245); reasons.push("M2>=200 y M3>=255"); }
+      return { max: maxM4, reasons };
+    }
+
+    function perpendicularOffset(length, angleRad) {
+      return {
+        x: length * Math.cos(angleRad + offsetSign * Math.PI / 2),
+        y: length * Math.sin(angleRad + offsetSign * Math.PI / 2)
+      };
+    }
+
+    function computePosePoints(m2Deg = state[2], m3Deg = state[3], m4Deg = state[4]) {
+      const a1 = degToRad((m2Deg - 180) + 90);
+      const a2 = degToRad(m3Deg - 90);
+      const a3 = degToRad(m4Deg - 180);
+
+      const p0 = { x: 0, y: geom.hBase };
+      const p1 = add(p0, vec(geom.l1, a1));
+      const p1o = add(p1, perpendicularOffset(geom.offsetM3, a1));
+      const p2 = add(p1o, vec(geom.l2, a1 + a2));
+      const p3 = add(p2, vec(geom.l3, a1 + a2 + a3));
+
+      if (!mirrorX) return { p0, p1, p1o, p2, p3 };
+      return {
+        p0: { x: -p0.x, y: p0.y },
+        p1: { x: -p1.x, y: p1.y },
+        p1o: { x: -p1o.x, y: p1o.y },
+        p2: { x: -p2.x, y: p2.y },
+        p3: { x: -p3.x, y: p3.y }
+      };
+    }
+
+    function computeGripperCorners(m2Deg = state[2], m3Deg = state[3], m4Deg = state[4]) {
+      const pts = computePosePoints(m2Deg, m3Deg, m4Deg);
+      const dir = sub(pts.p3, pts.p2);
+      const dirLen = Math.hypot(dir.x, dir.y) || 1;
+      const u = { x: dir.x / dirLen, y: dir.y / dirLen };
+      const n = { x: -u.y, y: u.x };
+      const halfW = geom.gripperWidth / 2;
+
+      const g0 = add(pts.p3, scale(n, -halfW));
+      const g1 = add(pts.p3, scale(n, halfW));
+      const g2 = add(g1, scale(u, geom.gripperLen));
+      const g3 = add(g0, scale(u, geom.gripperLen));
+      return { ...pts, g0, g1, g2, g3 };
+    }
+
+    function collidesWithBase(corners) {
+      const xMin = -geom.wBase / 2;
+      const xMax = geom.wBase / 2;
+      const yMin = 0;
+      const yMax = geom.hBase;
+      for (const c of corners) {
+        if (pointInRect(c, xMin, xMax, yMin, yMax)) return true;
+      }
+      const rectA = [
+        { x: xMin, y: yMin }, { x: xMax, y: yMin }, { x: xMax, y: yMax }, { x: xMin, y: yMax }
+      ];
+      const rectB = [
+        { x: xMax, y: yMin }, { x: xMax, y: yMax }, { x: xMin, y: yMax }, { x: xMin, y: yMin }
+      ];
+      for (let i = 0; i < 4; i++) {
+        const a = corners[i];
+        const b = corners[(i + 1) % 4];
+        for (let j = 0; j < 4; j++) {
+          if (segmentsIntersect(a, b, rectA[j], rectB[j])) return true;
+        }
+      }
+      return false;
+    }
+
+    function collidesWithLink(corners, a, b, thickness) {
+      const radius = thickness / 2;
+      for (const c of corners) {
+        if (pointSegmentDistance(c, a, b) <= radius) return true;
+      }
+      for (let i = 0; i < 4; i++) {
+        const e0 = corners[i];
+        const e1 = corners[(i + 1) % 4];
+        if (segmentsIntersect(e0, e1, a, b)) return true;
+        if (pointSegmentDistance(e0, a, b) <= radius) return true;
+        if (pointSegmentDistance(e1, a, b) <= radius) return true;
+      }
+      return false;
+    }
+
+    function classifyPose() {
+      const pts = computeGripperCorners();
+      const corners = [pts.g0, pts.g1, pts.g2, pts.g3];
+      const minY = Math.min(...corners.map(c => c.y));
+      let reason = "OK";
+      let invalid = false;
+      if (minY <= floorTouch) {
+        reason = "PISO";
+        invalid = true;
+      } else if (collidesWithBase(corners)) {
+        reason = "COLISION_BASE";
+        invalid = true;
+      } else if (collidesWithLink(corners, pts.p0, pts.p1, geom.w1)) {
+        reason = "COLISION_L1";
+        invalid = true;
+      } else if (collidesWithLink(corners, pts.p1o, pts.p2, geom.w2)) {
+        reason = "COLISION_L2";
+        invalid = true;
+      } else if (minY <= floorRisk) {
+        reason = "RIESGO_PISO";
+        invalid = true;
+      }
+      return { invalid, reason, minY, pts };
+    }
+
+    const container = document.getElementById("viewer");
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setSize(container.clientWidth, container.clientHeight);
+    container.appendChild(renderer.domElement);
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x060b14);
+
+    const camera = new THREE.PerspectiveCamera(42, container.clientWidth / container.clientHeight, 0.1, 3000);
+    camera.position.set(260, 180, 320);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.target.set(0, 120, 0);
+
+    scene.add(new THREE.HemisphereLight(0xdbeafe, 0x0f172a, 1.2));
+    const dir = new THREE.DirectionalLight(0xffffff, 1.25);
+    dir.position.set(220, 260, 180);
+    scene.add(dir);
+    const fill = new THREE.DirectionalLight(0x93c5fd, 0.45);
+    fill.position.set(-180, 120, -140);
+    scene.add(fill);
+
+    const grid = new THREE.GridHelper(700, 28, 0x334155, 0x1e293b);
+    grid.rotation.x = Math.PI / 2;
+    scene.add(grid);
+
+    const floor = new THREE.Mesh(
+      new THREE.BoxGeometry(700, 1.5, 250),
+      new THREE.MeshStandardMaterial({ color: 0x64748b, transparent: true, opacity: 0.32 })
+    );
+    scene.add(floor);
+
+    const floorTouchMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(700, 1.2, 250),
+      new THREE.MeshStandardMaterial({ color: 0x7f1d1d, transparent: true, opacity: 0.35 })
+    );
+    floorTouchMesh.position.y = floorTouch;
+    scene.add(floorTouchMesh);
+
+    const floorRiskMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(700, 1.2, 250),
+      new THREE.MeshStandardMaterial({ color: 0x7c2d12, transparent: true, opacity: 0.3 })
+    );
+    floorRiskMesh.position.y = floorRisk;
+    scene.add(floorRiskMesh);
+
+    const baseMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(geom.wBase, geom.hBase, 90),
+      new THREE.MeshStandardMaterial({ color: 0x475569, roughness: 0.8, metalness: 0.05 })
+    );
+    baseMesh.position.set(0, geom.hBase / 2, 0);
+    scene.add(baseMesh);
+
+    function makeBox(color, opacity = 1) {
+      return new THREE.Mesh(
+        new THREE.BoxGeometry(1, 1, 1),
+        new THREE.MeshStandardMaterial({
+          color,
+          transparent: opacity < 1,
+          opacity,
+          roughness: 0.65,
+          metalness: 0.05
+        })
+      );
+    }
+
+    const link1 = makeBox(0x22c55e);
+    const offsetLink = makeBox(0xf59e0b);
+    const link2 = makeBox(0x38bdf8);
+    const link3 = makeBox(0xf43f5e);
+    const gripper = makeBox(0xa78bfa, 0.8);
+    scene.add(link1, offsetLink, link2, link3, gripper);
+    scene.add(new THREE.AxesHelper(90));
+
+    function applySegment(mesh, a, b, thickness, color) {
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const len = Math.hypot(dx, dy);
+      mesh.visible = len > 1e-6;
+      if (!mesh.visible) return;
+      mesh.position.set((a.x + b.x) / 2, (a.y + b.y) / 2, 0);
+      mesh.scale.set(len, thickness, geom.depth);
+      mesh.rotation.set(0, 0, Math.atan2(dy, dx));
+      mesh.material.color.set(color);
+    }
+
+    function updateScene() {
+      const sim = classifyPose();
+      const { pts } = sim;
+      const { max, reasons } = getDynamicM4Max(state[2], state[3]);
+      sliders[4].max = max;
+      m4maxEl.textContent = `M4 max actual: ${max}°`;
+
+      const color4 = sim.reason === "RIESGO_PISO" ? "#f59e0b" : (sim.invalid ? "#ef4444" : "#f43f5e");
+      applySegment(link1, pts.p0, pts.p1, geom.w1, "#22c55e");
+      applySegment(offsetLink, pts.p1, pts.p1o, Math.max(10, geom.offsetM3 / 2), "#f59e0b");
+      applySegment(link2, pts.p1o, pts.p2, geom.w2, "#38bdf8");
+      applySegment(link3, pts.p2, pts.p3, geom.w3, color4);
+
+      const centerX = (pts.g0.x + pts.g1.x + pts.g2.x + pts.g3.x) / 4;
+      const centerY = (pts.g0.y + pts.g1.y + pts.g2.y + pts.g3.y) / 4;
+      gripper.position.set(centerX, centerY, 0);
+      gripper.rotation.set(0, 0, Math.atan2(pts.g3.y - pts.g0.y, pts.g3.x - pts.g0.x));
+      gripper.scale.set(geom.gripperLen, geom.gripperWidth, geom.depth * 1.3);
+      gripper.material.color.set(sim.invalid ? "#ef4444" : "#a78bfa");
+
+      const floorClass = sim.reason === "PISO" ? "bad" : (sim.reason === "RIESGO_PISO" ? "warn" : "good");
+      const ruleText = reasons.length ? reasons.join(" | ") : "Sin regla dinámica activa.";
+      statusEl.innerHTML =
+        `Estado pose: <span class="${sim.invalid ? "bad" : "good"}">${sim.invalid ? sim.reason : "PERMITIDA"}</span>\n` +
+        `Clearance al piso: <span class="${floorClass}">${sim.minY.toFixed(1)} mm</span>\n` +
+        `Reglas activas: ${ruleText}`;
+
+      floor.material.color.set(sim.reason === "PISO" ? 0xef4444 : 0x64748b);
+      floorRiskMesh.material.color.set(sim.reason === "RIESGO_PISO" ? 0xf59e0b : 0x7c2d12);
+      floorTouchMesh.material.color.set(sim.reason === "PISO" ? 0xef4444 : 0x7f1d1d);
+    }
+
+    function applySliderChange(id, rawValue) {
+      const next = Number(rawValue);
+      const old = state[id];
+      state[id] = next;
+      if (id === 4) {
+        const { max } = getDynamicM4Max(state[2], state[3]);
+        if (state[4] > max) state[4] = max;
+      }
+      const sim = classifyPose();
+      if (sim.invalid) {
+        state[id] = old;
+      } else {
+        lastValid[2] = state[2];
+        lastValid[3] = state[3];
+        lastValid[4] = state[4];
+      }
+      sliders[2].value = state[2];
+      sliders[3].value = state[3];
+      sliders[4].value = state[4];
+      labels[2].textContent = `${state[2]}°`;
+      labels[3].textContent = `${state[3]}°`;
+      labels[4].textContent = `${state[4]}°`;
+      updateScene();
+    }
+
+    Object.entries(sliders).forEach(([id, el]) => {
+      el.addEventListener("input", () => applySliderChange(Number(id), el.value));
+    });
+
+    function animate() {
+      requestAnimationFrame(animate);
+      controls.update();
+      renderer.render(scene, camera);
+    }
+
+    window.addEventListener("resize", () => {
+      const w = container.clientWidth;
+      const h = container.clientHeight;
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+      renderer.setSize(w, h);
+    });
+
+    updateScene();
+    animate();
+  </script>
+</body>
+</html>

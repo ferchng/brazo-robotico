@@ -1,0 +1,908 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Simulador 3D + Control con Reglas</title>
+  <style>
+    :root {
+      --bg: #0b1020;
+      --panel: #121a2d;
+      --card: #182237;
+      --text: #e5e7eb;
+      --muted: #94a3b8;
+      --ok: #22c55e;
+      --warn: #f59e0b;
+      --bad: #ef4444;
+      --blue: #38bdf8;
+      --border: #334155;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Segoe UI, Arial, sans-serif;
+      background: radial-gradient(circle at top, #16213a, var(--bg));
+      color: var(--text);
+    }
+    .wrap { max-width: 1500px; margin: 0 auto; padding: 20px; }
+    h1 { margin: 0 0 8px; }
+    .sub { color: var(--muted); margin-bottom: 16px; }
+    .toolbar, .panel, .motor-card {
+      background: rgba(18, 26, 45, 0.92);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+    }
+    .toolbar, .panel { padding: 14px; margin-bottom: 16px; }
+    .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    button {
+      border: 0;
+      border-radius: 12px;
+      padding: 10px 14px;
+      font-weight: 600;
+      cursor: pointer;
+      background: var(--blue);
+      color: #03111f;
+    }
+    button.secondary { background: #334155; color: var(--text); }
+    button.warn { background: var(--warn); color: #111827; }
+    .status { color: var(--muted); font-size: 14px; }
+    .ok { color: var(--ok); }
+    .bad { color: var(--bad); }
+    .layout { display: grid; grid-template-columns: 1.2fr 0.9fr; gap: 16px; }
+    .viewer-wrap { display: flex; flex-direction: column; gap: 10px; }
+    #viewer3d {
+      width: 100%;
+      height: 720px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: linear-gradient(180deg, #0d1628, #060b14);
+      overflow: hidden;
+    }
+    .motor-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+    .motor-card { padding: 14px; }
+    .motor-head { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; margin-bottom: 8px; }
+    .motor-role { color: var(--muted); font-size: 13px; }
+    .range-row, .ctrl-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+    input[type="range"] { width: 100%; accent-color: var(--ok); }
+    input[type="number"], input[type="text"] {
+      padding: 8px 10px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: #0d1628;
+      color: var(--text);
+    }
+    input[type="number"] { width: 88px; }
+    .val { min-width: 60px; text-align: right; color: var(--ok); font-weight: 700; }
+    .small { color: var(--muted); font-size: 13px; }
+    .axis { display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; margin-top: 4px; }
+    .console-row { display: flex; gap: 10px; margin-top: 8px; }
+    .console-row input { flex: 1; }
+    textarea {
+      width: 100%;
+      min-height: 220px;
+      margin-top: 12px;
+      padding: 12px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: #020617;
+      color: #d1fae5;
+      font-family: Consolas, monospace;
+      resize: vertical;
+    }
+    .mini-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 10px;
+      margin-top: 12px;
+    }
+    .metric {
+      padding: 10px 12px;
+      border-radius: 12px;
+      background: rgba(13, 22, 40, 0.9);
+      border: 1px solid var(--border);
+    }
+    .metric strong { display: block; margin-bottom: 4px; }
+    code {
+      background: rgba(2, 6, 23, 0.9);
+      border: 1px solid var(--border);
+      padding: 2px 6px;
+      border-radius: 8px;
+    }
+    @media (max-width: 1100px) {
+      .layout { grid-template-columns: 1fr; }
+      #viewer3d { height: 540px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Simulador 3D + Control con Reglas</h1>
+    <div class="sub">Vista 3D simplificada del brazo con las mismas reglas de M2/M3/M4. Al conectarse, pide <code>posall</code> y sincroniza la simulación con la postura real del hardware.</div>
+
+    <div class="toolbar">
+      <button id="connectBtn">Conectar ESP32</button>
+      <button id="disconnectBtn" class="secondary">Desconectar</button>
+      <button id="scanBtn" class="secondary">Scan</button>
+      <button id="posAllBtn" class="secondary">Posall</button>
+      <button id="applyAllBtn" class="warn">Aplicar sliders</button>
+      <button id="stopQueueBtn" class="secondary">Vaciar cola</button>
+      <span id="connState" class="status">Sin conectar</span>
+      <span id="queueState" class="status">Cola: 0</span>
+    </div>
+
+    <div class="layout">
+      <div class="panel viewer-wrap">
+        <div>
+          <strong>Vista 3D</strong>
+          <div class="small">Cámara orbital. La simulación sigue siendo la autoridad para M2/M3/M4: si la pose da <code>PISO</code>, <code>RIESGO_PISO</code>, <code>COLISION_BASE</code>, <code>COLISION_L1</code> o <code>COLISION_L2</code>, no se envía al brazo.</div>
+        </div>
+        <div id="viewer3d"></div>
+        <div id="simInfo" class="small"></div>
+        <div class="mini-grid">
+          <div class="metric">
+            <strong>Estado de pose</strong>
+            <span id="poseState">PERMITIDA</span>
+          </div>
+          <div class="metric">
+            <strong>Clearance al piso</strong>
+            <span id="floorState">-</span>
+          </div>
+          <div class="metric">
+            <strong>M4 máximo actual</strong>
+            <span id="m4State">260°</span>
+          </div>
+          <div class="metric">
+            <strong>Reglas activas</strong>
+            <span id="ruleState">Sin regla dinámica activa.</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div><strong>Control</strong></div>
+        <div class="small">Los sliders actualizan la escena 3D al instante. Si una pose es inválida, el control vuelve al último valor válido. La sincronización desde hardware refleja la pose real aunque sea inválida.</div>
+        <div id="motorGrid" class="motor-grid"></div>
+
+        <div class="panel" style="margin-top:16px;">
+          <div><strong>Consola</strong></div>
+          <div class="small">Para debug manual: <code>posall</code>, <code>read 3</code>, <code>scan</code>.</div>
+          <div class="console-row">
+            <input id="commandInput" type="text" placeholder="Ej: posall o read 4 o 2 180">
+            <button id="sendCmdBtn">Enviar</button>
+          </div>
+          <textarea id="log" readonly></textarea>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/three@0.165.0/build/three.min.js"></script>
+  <script src="https://unpkg.com/three@0.165.0/examples/js/controls/OrbitControls.js"></script>
+  <script>
+    const motors = [
+      { id: 1, label: "Motor 1", role: "direccion", min: 60, max: 300, initial: 180 },
+      { id: 2, label: "Motor 2", role: "codo 1", min: 90, max: 270, initial: 180 },
+      { id: 3, label: "Motor 3", role: "codo 2", min: 90, max: 270, initial: 90 },
+      { id: 4, label: "Motor 4", role: "muñeca de pinza", min: 75, max: 260, initial: 180 },
+      { id: 5, label: "Motor 5", role: "rotador de pinza", min: 0, max: 340, initial: 170 },
+      { id: 6, label: "Motor 6", role: "pinza", min: 0, max: 140, initial: 70 }
+    ];
+
+    const geom = {
+      hBase: 100,
+      wBase: 35,
+      l1: 113,
+      w1: 25,
+      offsetM3: 27,
+      l2: 137,
+      w2: 25,
+      l3: 60,
+      w3: 25,
+      gripperLen: 100,
+      gripperWidth: 65,
+      depth: 25
+    };
+
+    const floorY = 0;
+    const floorTouch = 5;
+    const floorRisk = 30;
+    const mirrorX = true;
+    const offsetSign = 1;
+    const moveCooldownMs = 1000;
+
+    const state = Object.fromEntries(motors.map(m => [m.id, m.initial]));
+    const lastValidState = Object.fromEntries(motors.map(m => [m.id, m.initial]));
+    let port = null;
+    let writer = null;
+    let reader = null;
+    let keepReading = false;
+    let commandQueue = [];
+    let queueBusy = false;
+    let lastMoveSentAt = 0;
+    let hardwareSyncActive = true;
+
+    const motorGrid = document.getElementById("motorGrid");
+    const log = document.getElementById("log");
+    const connState = document.getElementById("connState");
+    const queueState = document.getElementById("queueState");
+    const simInfo = document.getElementById("simInfo");
+    const poseStateEl = document.getElementById("poseState");
+    const floorStateEl = document.getElementById("floorState");
+    const m4StateEl = document.getElementById("m4State");
+    const ruleStateEl = document.getElementById("ruleState");
+
+    function addLog(text) {
+      log.value += text + "\n";
+      log.scrollTop = log.scrollHeight;
+    }
+
+    function setConnState(text, css = "") {
+      connState.className = `status ${css}`;
+      connState.textContent = text;
+    }
+
+    function updateQueueState() {
+      queueState.textContent = `Cola: ${commandQueue.length}`;
+    }
+
+    function clamp(value, min, max) {
+      return Math.min(max, Math.max(min, value));
+    }
+
+    function logicalDegreesFromRaw(id, rawDeg) {
+      let deg = rawDeg;
+      if (id === 6) deg -= 10;
+      return Math.round(deg);
+    }
+
+    function getDynamicM4Max(m2, m3) {
+      let maxM4 = 260;
+      const reasons = [];
+      if (m2 <= 100 && m3 <= 110) { maxM4 = Math.min(maxM4, 130); reasons.push("M2<=100 y M3<=110 -> M4<=130"); }
+      if (m2 <= 120 && m3 <= 100) { maxM4 = Math.min(maxM4, 120); reasons.push("M2<=120 y M3<=100 -> M4<=120"); }
+      if (m2 >= 240 && m3 >= 140) { maxM4 = Math.min(maxM4, 200); reasons.push("M2>=240 y M3>=140 -> M4<=200"); }
+      if (m2 >= 260) { maxM4 = Math.min(maxM4, 185); reasons.push("M2>=260 -> M4<=185"); }
+      if (m3 >= 250) { maxM4 = Math.min(maxM4, 230); reasons.push("M3>=250 -> M4<=230"); }
+      if (m2 >= 185 && m3 >= 245) { maxM4 = Math.min(maxM4, 250); reasons.push("M2>=185 y M3>=245 -> M4<=250"); }
+      if (m2 >= 200 && m3 >= 255) { maxM4 = Math.min(maxM4, 245); reasons.push("M2>=200 y M3>=255 -> M4<=245"); }
+      return { max: maxM4, reasons };
+    }
+
+    function degToRad(d) { return d * Math.PI / 180; }
+    function add(a, b) { return { x: a.x + b.x, y: a.y + b.y }; }
+    function sub(a, b) { return { x: a.x - b.x, y: a.y - b.y }; }
+    function scale(v, k) { return { x: v.x * k, y: v.y * k }; }
+    function vec(len, ang) { return { x: len * Math.cos(ang), y: len * Math.sin(ang) }; }
+    function dot(a, b) { return a.x * b.x + a.y * b.y; }
+
+    function pointSegmentDistance(p, a, b) {
+      const ab = sub(b, a);
+      const ap = sub(p, a);
+      const abLen2 = dot(ab, ab);
+      if (abLen2 <= 1e-9) return Math.hypot(p.x - a.x, p.y - a.y);
+      let t = dot(ap, ab) / abLen2;
+      t = Math.max(0, Math.min(1, t));
+      const proj = add(a, scale(ab, t));
+      return Math.hypot(p.x - proj.x, p.y - proj.y);
+    }
+
+    function orient(a, b, c) {
+      return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+    }
+
+    function onSegment(a, b, p) {
+      return Math.min(a.x, b.x) <= p.x && p.x <= Math.max(a.x, b.x) &&
+             Math.min(a.y, b.y) <= p.y && p.y <= Math.max(a.y, b.y);
+    }
+
+    function segmentsIntersect(a, b, c, d) {
+      const o1 = orient(a, b, c);
+      const o2 = orient(a, b, d);
+      const o3 = orient(c, d, a);
+      const o4 = orient(c, d, b);
+      if (Math.abs(o1) < 1e-6 && onSegment(a, b, c)) return true;
+      if (Math.abs(o2) < 1e-6 && onSegment(a, b, d)) return true;
+      if (Math.abs(o3) < 1e-6 && onSegment(c, d, a)) return true;
+      if (Math.abs(o4) < 1e-6 && onSegment(c, d, b)) return true;
+      return ((o1 > 0) !== (o2 > 0)) && ((o3 > 0) !== (o4 > 0));
+    }
+
+    function pointInRect(p, xMin, xMax, yMin, yMax) {
+      return xMin <= p.x && p.x <= xMax && yMin <= p.y && p.y <= yMax;
+    }
+
+    function perpendicularOffset(length, angleRad) {
+      return {
+        x: length * Math.cos(angleRad + offsetSign * Math.PI / 2),
+        y: length * Math.sin(angleRad + offsetSign * Math.PI / 2)
+      };
+    }
+
+    function computePosePoints(m2Deg = state[2], m3Deg = state[3], m4Deg = state[4]) {
+      const a1 = degToRad((m2Deg - 180) + 90);
+      const a2 = degToRad(m3Deg - 90);
+      const a3 = degToRad(m4Deg - 180);
+
+      const p0 = { x: 0, y: geom.hBase };
+      const p1 = add(p0, vec(geom.l1, a1));
+      const p1o = add(p1, perpendicularOffset(geom.offsetM3, a1));
+      const p2 = add(p1o, vec(geom.l2, a1 + a2));
+      const p3 = add(p2, vec(geom.l3, a1 + a2 + a3));
+
+      if (!mirrorX) return { p0, p1, p1o, p2, p3, a1, a2, a3 };
+      return {
+        p0: { x: -p0.x, y: p0.y },
+        p1: { x: -p1.x, y: p1.y },
+        p1o: { x: -p1o.x, y: p1o.y },
+        p2: { x: -p2.x, y: p2.y },
+        p3: { x: -p3.x, y: p3.y },
+        a1, a2, a3
+      };
+    }
+
+    function computeGripperCorners(m2Deg = state[2], m3Deg = state[3], m4Deg = state[4]) {
+      const pts = computePosePoints(m2Deg, m3Deg, m4Deg);
+      const dir = sub(pts.p3, pts.p2);
+      const dirLen = Math.hypot(dir.x, dir.y) || 1;
+      const u = { x: dir.x / dirLen, y: dir.y / dirLen };
+      const n = { x: -u.y, y: u.x };
+      const halfW = geom.gripperWidth / 2;
+
+      const g0 = add(pts.p3, scale(n, -halfW));
+      const g1 = add(pts.p3, scale(n, halfW));
+      const g2 = add(g1, scale(u, geom.gripperLen));
+      const g3 = add(g0, scale(u, geom.gripperLen));
+      return { ...pts, g0, g1, g2, g3, u, n };
+    }
+
+    function collidesWithBase(corners) {
+      const xMin = -geom.wBase / 2;
+      const xMax = geom.wBase / 2;
+      const yMin = 0;
+      const yMax = geom.hBase;
+      for (const c of corners) {
+        if (pointInRect(c, xMin, xMax, yMin, yMax)) return true;
+      }
+      const rectA = [
+        { x: xMin, y: yMin }, { x: xMax, y: yMin }, { x: xMax, y: yMax }, { x: xMin, y: yMax }
+      ];
+      const rectB = [
+        { x: xMax, y: yMin }, { x: xMax, y: yMax }, { x: xMin, y: yMax }, { x: xMin, y: yMin }
+      ];
+      for (let i = 0; i < 4; i++) {
+        const a = corners[i];
+        const b = corners[(i + 1) % 4];
+        for (let j = 0; j < 4; j++) {
+          if (segmentsIntersect(a, b, rectA[j], rectB[j])) return true;
+        }
+      }
+      return false;
+    }
+
+    function collidesWithLink(corners, a, b, thickness) {
+      const radius = thickness / 2;
+      for (const c of corners) {
+        if (pointSegmentDistance(c, a, b) <= radius) return true;
+      }
+      for (let i = 0; i < 4; i++) {
+        const e0 = corners[i];
+        const e1 = corners[(i + 1) % 4];
+        if (segmentsIntersect(e0, e1, a, b)) return true;
+        if (pointSegmentDistance(e0, a, b) <= radius) return true;
+        if (pointSegmentDistance(e1, a, b) <= radius) return true;
+      }
+      return false;
+    }
+
+    function classifyPose(m2Deg = state[2], m3Deg = state[3], m4Deg = state[4]) {
+      const pts = computeGripperCorners(m2Deg, m3Deg, m4Deg);
+      const corners = [pts.g0, pts.g1, pts.g2, pts.g3];
+      const minY = Math.min(...corners.map(c => c.y));
+      const floor = {
+        mm: minY,
+        label: minY <= floorTouch ? "PISO" : (minY <= floorRisk ? "RIESGO PISO" : "OK"),
+        color: minY <= floorTouch ? "#ef4444" : (minY <= floorRisk ? "#f59e0b" : "#22c55e")
+      };
+
+      let reason = "OK";
+      let invalid = false;
+      if (minY <= floorTouch) {
+        reason = "PISO";
+        invalid = true;
+      } else if (collidesWithBase(corners)) {
+        reason = "COLISION_BASE";
+        invalid = true;
+      } else if (collidesWithLink(corners, pts.p0, pts.p1, geom.w1)) {
+        reason = "COLISION_L1";
+        invalid = true;
+      } else if (collidesWithLink(corners, pts.p1o, pts.p2, geom.w2)) {
+        reason = "COLISION_L2";
+        invalid = true;
+      } else if (minY <= floorRisk) {
+        reason = "RIESGO_PISO";
+        invalid = true;
+      }
+
+      return { invalid, reason, floor, pts };
+    }
+
+    const scene3d = {
+      renderer: null,
+      scene: null,
+      camera: null,
+      controls: null,
+      baseMesh: null,
+      link1: null,
+      offsetLink: null,
+      link2: null,
+      link3: null,
+      gripper: null,
+      floor: null,
+      floorRisk: null,
+      floorTouch: null
+    };
+
+    function applySegment(mesh, a, b, thickness, color) {
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const len = Math.hypot(dx, dy);
+      if (len < 1e-6) {
+        mesh.visible = false;
+        return;
+      }
+      mesh.visible = true;
+      mesh.position.set((a.x + b.x) / 2, (a.y + b.y) / 2, 0);
+      mesh.scale.set(len, thickness, geom.depth);
+      mesh.rotation.set(0, 0, Math.atan2(dy, dx));
+      mesh.material.color.set(color);
+    }
+
+    function updateGripperMesh(pts, color) {
+      const centerX = (pts.g0.x + pts.g1.x + pts.g2.x + pts.g3.x) / 4;
+      const centerY = (pts.g0.y + pts.g1.y + pts.g2.y + pts.g3.y) / 4;
+      scene3d.gripper.position.set(centerX, centerY, 0);
+      const angle = Math.atan2(pts.g3.y - pts.g0.y, pts.g3.x - pts.g0.x);
+      scene3d.gripper.rotation.set(0, 0, angle);
+      scene3d.gripper.scale.set(geom.gripperLen, geom.gripperWidth, geom.depth * 1.3);
+      scene3d.gripper.material.color.set(color);
+    }
+
+    function update3DScene() {
+      const sim = classifyPose();
+      const pts = sim.pts;
+      const { max, reasons } = getDynamicM4Max(state[2], state[3]);
+
+      const safeColor = "#22c55e";
+      const warnColor = sim.reason === "RIESGO_PISO" ? "#f59e0b" : (sim.invalid ? "#ef4444" : "#38bdf8");
+      const gripColor = sim.invalid ? "#ef4444" : "#a78bfa";
+
+      applySegment(scene3d.link1, pts.p0, pts.p1, geom.w1, safeColor);
+      applySegment(scene3d.offsetLink, pts.p1, pts.p1o, Math.max(10, geom.offsetM3 / 2), "#f59e0b");
+      applySegment(scene3d.link2, pts.p1o, pts.p2, geom.w2, "#38bdf8");
+      applySegment(scene3d.link3, pts.p2, pts.p3, geom.w3, warnColor);
+      updateGripperMesh(pts, gripColor);
+
+      scene3d.floor.material.color.set(sim.reason === "PISO" ? "#ef4444" : "#64748b");
+      scene3d.floorRisk.material.color.set(sim.reason === "RIESGO_PISO" ? "#f59e0b" : "#7c2d12");
+      scene3d.floorTouch.material.color.set(sim.reason === "PISO" ? "#ef4444" : "#7f1d1d");
+
+      poseStateEl.textContent = sim.invalid ? sim.reason : "PERMITIDA";
+      poseStateEl.className = sim.invalid ? "bad" : "ok";
+      floorStateEl.textContent = `${sim.floor.label} (${sim.floor.mm.toFixed(1)} mm)`;
+      floorStateEl.style.color = sim.floor.color;
+      m4StateEl.textContent = `${max}°`;
+      ruleStateEl.textContent = reasons.length ? reasons.join(" | ") : "Sin regla dinámica activa.";
+
+      simInfo.innerHTML =
+        `M2=${state[2]}° | M3=${state[3]}° | M4=${state[4]}°<br>` +
+        `Estado de pose: <span class="${sim.invalid ? "bad" : "ok"}">${sim.invalid ? sim.reason : "PERMITIDA"}</span> | ` +
+        `clearance al piso: <span style="color:${sim.floor.color}">${sim.floor.mm.toFixed(1)} mm</span> | ` +
+        `M4 máximo actual: <strong>${max}°</strong>`;
+    }
+
+    function createBox(color, opacity = 1) {
+      return new THREE.Mesh(
+        new THREE.BoxGeometry(1, 1, 1),
+        new THREE.MeshStandardMaterial({
+          color,
+          transparent: opacity < 1,
+          opacity,
+          roughness: 0.65,
+          metalness: 0.05
+        })
+      );
+    }
+
+    function init3D() {
+      const container = document.getElementById("viewer3d");
+      const width = container.clientWidth;
+      const height = container.clientHeight;
+
+      scene3d.renderer = new THREE.WebGLRenderer({ antialias: true });
+      scene3d.renderer.setSize(width, height);
+      scene3d.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      container.innerHTML = "";
+      container.appendChild(scene3d.renderer.domElement);
+
+      scene3d.scene = new THREE.Scene();
+      scene3d.scene.background = new THREE.Color(0x060b14);
+
+      scene3d.camera = new THREE.PerspectiveCamera(42, width / height, 0.1, 3000);
+      scene3d.camera.position.set(260, 180, 320);
+
+      scene3d.controls = new THREE.OrbitControls(scene3d.camera, scene3d.renderer.domElement);
+      scene3d.controls.enableDamping = true;
+      scene3d.controls.target.set(0, 120, 0);
+
+      const hemi = new THREE.HemisphereLight(0xdbeafe, 0x0f172a, 1.2);
+      const dir = new THREE.DirectionalLight(0xffffff, 1.2);
+      dir.position.set(220, 260, 180);
+      const fill = new THREE.DirectionalLight(0x93c5fd, 0.45);
+      fill.position.set(-180, 120, -140);
+      scene3d.scene.add(hemi, dir, fill);
+
+      const grid = new THREE.GridHelper(700, 28, 0x334155, 0x1e293b);
+      grid.rotation.x = Math.PI / 2;
+      grid.position.y = 0;
+      scene3d.scene.add(grid);
+
+      scene3d.floor = new THREE.Mesh(
+        new THREE.BoxGeometry(700, 1.5, 250),
+        new THREE.MeshStandardMaterial({ color: 0x64748b, transparent: true, opacity: 0.32 })
+      );
+      scene3d.floor.position.set(0, 0, 0);
+      scene3d.scene.add(scene3d.floor);
+
+      scene3d.floorTouch = new THREE.Mesh(
+        new THREE.BoxGeometry(700, 1.2, 250),
+        new THREE.MeshStandardMaterial({ color: 0x7f1d1d, transparent: true, opacity: 0.35 })
+      );
+      scene3d.floorTouch.position.set(0, floorTouch, 0);
+      scene3d.scene.add(scene3d.floorTouch);
+
+      scene3d.floorRisk = new THREE.Mesh(
+        new THREE.BoxGeometry(700, 1.2, 250),
+        new THREE.MeshStandardMaterial({ color: 0x7c2d12, transparent: true, opacity: 0.3 })
+      );
+      scene3d.floorRisk.position.set(0, floorRisk, 0);
+      scene3d.scene.add(scene3d.floorRisk);
+
+      scene3d.baseMesh = new THREE.Mesh(
+        new THREE.BoxGeometry(geom.wBase, geom.hBase, 90),
+        new THREE.MeshStandardMaterial({ color: 0x475569, roughness: 0.8, metalness: 0.05 })
+      );
+      scene3d.baseMesh.position.set(0, geom.hBase / 2, 0);
+      scene3d.scene.add(scene3d.baseMesh);
+
+      scene3d.link1 = createBox(0x22c55e);
+      scene3d.offsetLink = createBox(0xf59e0b);
+      scene3d.link2 = createBox(0x38bdf8);
+      scene3d.link3 = createBox(0xf43f5e);
+      scene3d.gripper = createBox(0xa78bfa, 0.78);
+      scene3d.scene.add(scene3d.link1, scene3d.offsetLink, scene3d.link2, scene3d.link3, scene3d.gripper);
+
+      const axis = new THREE.AxesHelper(90);
+      axis.position.set(0, 0, 0);
+      scene3d.scene.add(axis);
+
+      window.addEventListener("resize", onResize3D);
+      animate3D();
+    }
+
+    function onResize3D() {
+      if (!scene3d.renderer) return;
+      const container = document.getElementById("viewer3d");
+      const width = container.clientWidth;
+      const height = container.clientHeight;
+      scene3d.camera.aspect = width / height;
+      scene3d.camera.updateProjectionMatrix();
+      scene3d.renderer.setSize(width, height);
+    }
+
+    function animate3D() {
+      requestAnimationFrame(animate3D);
+      if (!scene3d.renderer) return;
+      scene3d.controls.update();
+      scene3d.renderer.render(scene3d.scene, scene3d.camera);
+    }
+
+    function refreshDynamicM4Ui() {
+      const { max } = getDynamicM4Max(state[2], state[3]);
+      const m4Slider = document.querySelector('[data-slider-id="4"]');
+      const m4Value = document.querySelector('[data-value-id="4"]');
+      const m4Input = document.querySelector('[data-input-id="4"]');
+      const m4Badge = document.querySelector('[data-m4-badge]');
+      if (m4Slider) m4Slider.max = max;
+      if (m4Input) m4Input.max = max;
+      if (m4Badge) m4Badge.textContent = `M4 max actual: ${max}°`;
+      if (state[4] > max) {
+        state[4] = max;
+        if (m4Slider) m4Slider.value = max;
+        if (m4Input) m4Input.value = max;
+        if (m4Value) m4Value.textContent = `${max}°`;
+      }
+    }
+
+    function getMotorById(id) {
+      return motors.find(m => m.id === id);
+    }
+
+    function syncControlsFromState() {
+      motors.forEach(m => {
+        const slider = document.querySelector(`[data-slider-id="${m.id}"]`);
+        const input = document.querySelector(`[data-input-id="${m.id}"]`);
+        const value = document.querySelector(`[data-value-id="${m.id}"]`);
+        if (slider) slider.value = state[m.id];
+        if (input) input.value = state[m.id];
+        if (value) value.textContent = `${state[m.id]}°`;
+      });
+      refreshDynamicM4Ui();
+      update3DScene();
+    }
+
+    function setMotorValue(id, value, opts = {}) {
+      const motor = getMotorById(id);
+      let nextValue = Math.round(clamp(value, motor.min, motor.max));
+      if (id === 4) {
+        const { max } = getDynamicM4Max(state[2], state[3]);
+        nextValue = Math.min(nextValue, max);
+      }
+      state[id] = nextValue;
+
+      if (!opts.fromHardware && (id === 2 || id === 3 || id === 4)) {
+        const sim = classifyPose();
+        if (sim.invalid) {
+          state[id] = lastValidState[id];
+          addLog(`[BLOQUEO UI] M${id} rechazado: ${sim.reason}.`);
+          syncControlsFromState();
+          return false;
+        }
+        lastValidState[2] = state[2];
+        lastValidState[3] = state[3];
+        lastValidState[4] = state[4];
+      }
+
+      if (!opts.fromHardware && id === 4) {
+        const { max } = getDynamicM4Max(state[2], state[3]);
+        if (state[4] > max) {
+          state[4] = lastValidState[4];
+          addLog(`[BLOQUEO UI] M4 excede máximo dinámico ${max}.`);
+          syncControlsFromState();
+          return false;
+        }
+      }
+
+      syncControlsFromState();
+      return true;
+    }
+
+    function renderControls() {
+      motorGrid.innerHTML = "";
+      motors.forEach(m => {
+        const card = document.createElement("div");
+        card.className = "motor-card";
+        const axisLegend = m.id === 6 ? `<div class="axis"><span>cerrar</span><span>abrir</span></div>` : "";
+        const extraBadge = m.id === 4 ? `<div class="small" data-m4-badge>M4 max actual: 260°</div>` : "";
+        card.innerHTML = `
+          <div class="motor-head">
+            <div>
+              <strong>${m.label}</strong>
+              <div class="motor-role">${m.role}</div>
+            </div>
+            <span class="small">ID ${m.id}</span>
+          </div>
+          <div class="small">Rango: ${m.min}..${m.max}°</div>
+          <div class="range-row">
+            <input data-slider-id="${m.id}" type="range" min="${m.min}" max="${m.max}" step="1" value="${state[m.id]}">
+            <span class="val" data-value-id="${m.id}">${state[m.id]}°</span>
+          </div>
+          ${axisLegend}
+          <div class="ctrl-row">
+            <input data-input-id="${m.id}" type="number" min="${m.min}" max="${m.max}" step="1" value="${state[m.id]}">
+            <button data-move-id="${m.id}">Mover ahora</button>
+            <button class="secondary" data-read-id="${m.id}">Leer</button>
+          </div>
+          ${extraBadge}
+        `;
+        motorGrid.appendChild(card);
+      });
+
+      motors.forEach(m => {
+        const slider = document.querySelector(`[data-slider-id="${m.id}"]`);
+        const input = document.querySelector(`[data-input-id="${m.id}"]`);
+        const value = document.querySelector(`[data-value-id="${m.id}"]`);
+        const moveBtn = document.querySelector(`[data-move-id="${m.id}"]`);
+        const readBtn = document.querySelector(`[data-read-id="${m.id}"]`);
+
+        slider.addEventListener("input", () => {
+          const next = Number(slider.value);
+          value.textContent = `${next}°`;
+          input.value = next;
+          setMotorValue(m.id, next);
+        });
+
+        input.addEventListener("change", () => {
+          const next = Number(input.value);
+          if (setMotorValue(m.id, next)) {
+            slider.value = state[m.id];
+            value.textContent = `${state[m.id]}°`;
+            input.value = state[m.id];
+          }
+        });
+
+        moveBtn.addEventListener("click", () => enqueueMove(m.id, state[m.id]));
+        readBtn.addEventListener("click", () => sendCommand(`read ${m.id}`));
+      });
+    }
+
+    function syncFromHardwarePose(updates) {
+      hardwareSyncActive = false;
+      for (const [idStr, rawDeg] of Object.entries(updates)) {
+        const id = Number(idStr);
+        const motor = getMotorById(id);
+        if (!motor) continue;
+        const logical = clamp(logicalDegreesFromRaw(id, Number(rawDeg)), motor.min, motor.max);
+        state[id] = logical;
+        if (id === 2 || id === 3 || id === 4) lastValidState[id] = logical;
+      }
+      hardwareSyncActive = true;
+      syncControlsFromState();
+    }
+
+    function enqueueMove(id, angle) {
+      if (id === 2 || id === 3 || id === 4) {
+        const sim = classifyPose();
+        if (sim.invalid) {
+          addLog(`[BLOQUEO UI] Movimiento rechazado para M${id}: ${sim.reason}.`);
+          return;
+        }
+      }
+      if (id === 4) {
+        const { max } = getDynamicM4Max(state[2], state[3]);
+        if (angle > max) {
+          addLog(`[BLOQUEO UI] M4=${angle} excede el máximo actual ${max}.`);
+          return;
+        }
+      }
+      commandQueue = commandQueue.filter(item => item.id !== id);
+      commandQueue.push({ id, angle });
+      updateQueueState();
+      processQueue();
+    }
+
+    async function processQueue() {
+      if (queueBusy) return;
+      queueBusy = true;
+      while (commandQueue.length > 0) {
+        const item = commandQueue.shift();
+        updateQueueState();
+        const now = Date.now();
+        const remaining = moveCooldownMs - (now - lastMoveSentAt);
+        if (remaining > 0) await new Promise(resolve => setTimeout(resolve, remaining));
+        lastMoveSentAt = Date.now();
+        await sendCommand(`${item.id} ${item.angle}`);
+      }
+      queueBusy = false;
+    }
+
+    async function sendCommand(cmd) {
+      if (!writer) {
+        addLog("[ERROR] No hay puerto conectado.");
+        return;
+      }
+      await writer.write(new TextEncoder().encode(cmd.trim() + "\n"));
+      addLog(`> ${cmd}`);
+    }
+
+    async function connectSerial() {
+      if (!("serial" in navigator)) {
+        addLog("[ERROR] Usa Edge o Chrome con Web Serial.");
+        return;
+      }
+      port = await navigator.serial.requestPort();
+      await port.open({ baudRate: 115200 });
+      writer = port.writable.getWriter();
+      keepReading = true;
+      setConnState("Conectado", "ok");
+      addLog("[INFO] Puerto abierto a 115200.");
+      readLoop();
+      setTimeout(() => sendCommand("posall"), 250);
+    }
+
+    async function disconnectSerial() {
+      keepReading = false;
+      try { if (reader) { await reader.cancel(); reader.releaseLock(); reader = null; } } catch {}
+      try { if (writer) { writer.releaseLock(); writer = null; } } catch {}
+      try { if (port) { await port.close(); port = null; } } catch {}
+      setConnState("Sin conectar");
+      addLog("[INFO] Puerto cerrado.");
+    }
+
+    function handleSerialLine(line) {
+      if (!hardwareSyncActive) return;
+
+      const posMatches = [...line.matchAll(/POS ID\s+(\d+):\s+\d+\s+\(~([0-9.+-]+)\s+deg\)/g)];
+      if (posMatches.length > 0) {
+        const updates = {};
+        for (const match of posMatches) updates[Number(match[1])] = Number(match[2]);
+        syncFromHardwarePose(updates);
+        return;
+      }
+
+      const compactMatches = [...line.matchAll(/M(\d+)=\d+\(([0-9.+-]+)deg\)/g)];
+      if (compactMatches.length > 0) {
+        const updates = {};
+        for (const match of compactMatches) updates[Number(match[1])] = Number(match[2]);
+        syncFromHardwarePose(updates);
+      }
+    }
+
+    async function readLoop() {
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (port && keepReading && port.readable) {
+        try {
+          reader = port.readable.getReader();
+          while (keepReading) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split(/\r?\n/);
+            buffer = lines.pop();
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (!trimmed) continue;
+              handleSerialLine(trimmed);
+              addLog(trimmed);
+            }
+          }
+        } catch (err) {
+          addLog(`[ERROR] Lectura serie: ${err.message}`);
+          break;
+        } finally {
+          if (reader) { reader.releaseLock(); reader = null; }
+        }
+      }
+    }
+
+    document.getElementById("connectBtn").addEventListener("click", connectSerial);
+    document.getElementById("disconnectBtn").addEventListener("click", disconnectSerial);
+    document.getElementById("scanBtn").addEventListener("click", () => sendCommand("scan"));
+    document.getElementById("posAllBtn").addEventListener("click", () => sendCommand("posall"));
+    document.getElementById("applyAllBtn").addEventListener("click", () => {
+      const sim = classifyPose();
+      if (sim.invalid) {
+        addLog(`[BLOQUEO UI] No se aplica la postura completa: ${sim.reason}.`);
+        return;
+      }
+      motors.forEach(m => enqueueMove(m.id, state[m.id]));
+    });
+    document.getElementById("stopQueueBtn").addEventListener("click", () => {
+      commandQueue = [];
+      updateQueueState();
+      addLog("[INFO] Cola vaciada.");
+    });
+    document.getElementById("sendCmdBtn").addEventListener("click", async () => {
+      const input = document.getElementById("commandInput");
+      const cmd = input.value.trim();
+      if (!cmd) return;
+      await sendCommand(cmd);
+      input.value = "";
+    });
+    document.getElementById("commandInput").addEventListener("keydown", async (e) => {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      const input = document.getElementById("commandInput");
+      const cmd = input.value.trim();
+      if (!cmd) return;
+      await sendCommand(cmd);
+      input.value = "";
+    });
+
+    renderControls();
+    init3D();
+    syncControlsFromState();
+    updateQueueState();
+  </script>
+</body>
+</html>
